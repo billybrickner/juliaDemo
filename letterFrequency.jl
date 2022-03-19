@@ -118,19 +118,28 @@ function getKeyThreaded(secretText::Vector{UInt32})::Char
     maxScore = UInt32(0)
     maxKey = Char(0)
     lk = ReentrantLock()
-    Threads.@threads for key in typemin(UInt32):MAX_VALUE_CHECKED
-        score = UInt32(0)
-        for c in secretText[1:64]
-            cGuess = c ⊻ key
-            if (lowestChar <= cGuess) && (highestChar >= cGuess)
-                @inbounds score += frequencies[(cGuess - lowestChar) + 1]
+    Threads.@threads for thrdIdx in 1:Threads.nthreads()
+        threadMaxScore = maxScore
+        threadMaxKey = maxKey
+        for key in typemin(UInt32):Threads.nthreads():MAX_VALUE_CHECKED
+            key = key + thrdIdx - 1
+            score = UInt32(0)
+            for c in secretText
+                cGuess = c ⊻ key
+                if (lowestChar <= cGuess) && (highestChar >= cGuess)
+                    @inbounds score += frequencies[(cGuess - lowestChar) + 1]
+                end
+            end
+            if score > threadMaxScore
+                threadMaxScore = score
+                threadMaxKey = key
             end
         end
-        if score > maxScore
+        if threadMaxScore > maxScore
             lock(lk) do
-                if score > maxScore
-                    maxScore = score
-                    maxKey = key
+                if threadMaxScore > maxScore
+                    maxScore = threadMaxScore
+                    maxKey = threadMaxKey
                 end
             end
         end
@@ -163,7 +172,7 @@ function getKeyGPU(secretText::Vector{UInt32})::Char
     lowestChar, highestChar, frequencies = getFrequencies()
     keyScores = CUDA.fill(0.0f0, MAX_VALUE_CHECKED+1)
     @cuda  threads=1024 getKeyGPUKernel!(
-                            cu(secretText[1:64]),
+                            cu(secretText),
                             keyScores,
                             cu(frequencies),
                             lowestChar,
@@ -180,17 +189,18 @@ function main()
         end
         secretText = base64decode(secretCodedText)
         secretText = Vector(reinterpret(UInt32, secretText))
+        secretTextSub = secretText[1:64]
         key = getKeyOracle()
+        print("Normal Loop          ")
+        @test key == @btime getKey($secretTextSub)
+        print("Threaded (", Threads.nthreads(), " threads)")
+        @test key == @btime getKeyThreaded($secretTextSub)
+        print("GPU                  ")
+        @test key == @btime getKeyGPU($secretTextSub)
+        text = [Char(UInt32(c) ⊻ UInt32(key)) for c in secretText]
         println("Bounds:")
         println("\tMin: 0x00000000")
         println("\tMax: 0x80000000")
-        println("Normal Loop")
-        @test key == @btime getKey($secretText)
-        println("Threaded Loop (", Threads.nthreads(), " threads)")
-        @test key == @btime getKeyThreaded($secretText)
-        println("GPU Loop")
-        @test key == @btime getKeyGPU($secretText)
-        text = [Char(UInt32(c) ⊻ UInt32(key)) for c in secretText]
         println("Key: ", key)
         println("Text:")
         println(join(text[1:57]))
