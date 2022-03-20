@@ -152,26 +152,26 @@ function getKeyGPUKernel!(secretText::CuDeviceVector{UInt32, 1},
                             frequencies::CuDeviceVector{Float32,1},
                             lowestChar::UInt32,
                             highestChar::UInt32)
-    index = threadIdx().x
-    stride = blockDim().x
-    for keyIndex = index:stride:length(keyScores)
-        score = UInt32(0)
-        for c in secretText
-            key = keyIndex - 1
-            cGuess = c ⊻ key
-            if (lowestChar <= cGuess) && (highestChar >= cGuess)
-                @inbounds score += frequencies[(cGuess - lowestChar) + 1]
-            end
+
+    keyIndex = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+
+    score = UInt32(0)
+    for c in secretText
+        key = keyIndex - 1
+        cGuess = c ⊻ key
+        if (lowestChar <= cGuess) && (highestChar >= cGuess)
+            @inbounds score += frequencies[(cGuess - lowestChar) + 1]
         end
-        @inbounds keyScores[keyIndex] = score
     end
+
+    @inbounds keyScores[keyIndex] = score
     return nothing
 end
 
 function getKeyGPU(secretText::Vector{UInt32})::Char
     lowestChar, highestChar, frequencies = getFrequencies()
     keyScores = CUDA.fill(0.0f0, MAX_VALUE_CHECKED+1)
-    @cuda  threads=1024 getKeyGPUKernel!(
+    @cuda  threads=1024 blocks=cld(length(keyScores), 1024) getKeyGPUKernel!(
                             cu(secretText),
                             keyScores,
                             cu(frequencies),
