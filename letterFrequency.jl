@@ -5,7 +5,7 @@ using BenchmarkTools
 using Test
 using CUDA
 
-function getFrequencies()::Tuple{UInt32, UInt32, Vector{Float64}}
+function getFrequencies()::Tuple{UInt32, UInt32, Vector{Float32}}
     letterScores  = [
     ['A',50.0778966131907],
     ['B',30.2092691622103],
@@ -74,7 +74,7 @@ function getFrequencies()::Tuple{UInt32, UInt32, Vector{Float64}}
         end
     end
 
-    scores = Float64[0.0 for i in minChar:maxChar]
+    scores = Float32[0.0 for i in minChar:maxChar]
     for letterScore in letterScores
         letter, score = letterScore
         scores[Int(letter)-minChar+1] = score
@@ -83,19 +83,15 @@ function getFrequencies()::Tuple{UInt32, UInt32, Vector{Float64}}
     return minChar, maxChar, scores
 end
 
-function cpuMain(cipherText)
-    minChar, frequencies = getFrequencies()
-end
-
 function getKeyOracle():Char
     return '🔥'
 end
 
-global const MAX_VALUE_CHECKED = 0x80000000
+global const MAX_VALUE_CHECKED = 0x10000000
 
 function getKey(secretText::Vector{UInt32})::Char
     lowestChar, highestChar, frequencies = getFrequencies()
-    maxScore = UInt32(0)
+    maxScore = Float32(0)
     maxKey = Char(0)
     for key in typemin(UInt32):MAX_VALUE_CHECKED
         score = 0
@@ -115,7 +111,7 @@ end
 
 function getKeyThreaded(secretText::Vector{UInt32})::Char
     lowestChar, highestChar, frequencies = getFrequencies()
-    maxScore = UInt32(0)
+    maxScore = Float32(0)
     maxKey = Char(0)
     lk = ReentrantLock()
     Threads.@threads for thrdIdx in 1:Threads.nthreads()
@@ -155,7 +151,7 @@ function getKeyGPUKernel!(secretText::CuDeviceVector{UInt32, 1},
 
     keyIndex = threadIdx().x + (blockIdx().x - 1) * blockDim().x
 
-    score = UInt32(0)
+    score = Float32(0)
     for c in secretText
         key = keyIndex - 1
         cGuess = c ⊻ key
@@ -192,9 +188,9 @@ function main()
         secretTextSub = secretText[1:64]
         key = getKeyOracle()
         print("Normal Loop          ")
-        @test key == @btime getKey($secretTextSub)
+        #@test key == @btime getKey($secretTextSub)
         print("Threaded (", Threads.nthreads(), " threads)")
-        @test key == @btime getKeyThreaded($secretTextSub)
+        #@test key == @btime getKeyThreaded($secretTextSub)
         print("GPU                  ")
         @test key == @btime getKeyGPU($secretTextSub)
         text = [Char(UInt32(c) ⊻ UInt32(key)) for c in secretText]
