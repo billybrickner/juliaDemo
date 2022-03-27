@@ -87,7 +87,7 @@ function getKeyOracle():Char
     return '🔥'
 end
 
-global const MAX_VALUE_CHECKED = 0x10000000
+global const MAX_VALUE_CHECKED = 0x80000000
 
 function getKey(secretText::Vector{UInt32})::Char
     lowestChar, highestChar, frequencies = getFrequencies()
@@ -114,10 +114,11 @@ function getKeyThreaded(secretText::Vector{UInt32})::Char
     maxScore = Float32(0)
     maxKey = Char(0)
     lk = ReentrantLock()
-    Threads.@threads for thrdIdx in 1:Threads.nthreads()
+    threadLoops = Threads.nthreads()*128
+    Threads.@threads for thrdIdx in 1:threadLoops
         threadMaxScore = maxScore
         threadMaxKey = maxKey
-        for key in typemin(UInt32):Threads.nthreads():MAX_VALUE_CHECKED
+        for key in typemin(UInt32):threadLoops:MAX_VALUE_CHECKED
             key = key + thrdIdx - 1
             score = UInt32(0)
             for c in secretText
@@ -188,9 +189,9 @@ function main()
         secretTextSub = secretText[1:64]
         key = getKeyOracle()
         print("Normal Loop          ")
-        #@test key == @btime getKey($secretTextSub)
+        @test key == @btime getKey($secretTextSub)
         print("Threaded (", Threads.nthreads(), " threads)")
-        #@test key == @btime getKeyThreaded($secretTextSub)
+        @test key == @btime getKeyThreaded($secretTextSub)
         print("GPU                  ")
         @test key == @btime getKeyGPU($secretTextSub)
         text = [Char(UInt32(c) ⊻ UInt32(key)) for c in secretText]
